@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Chat Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            height: 100vh;
+            margin: 0;
+            background-color: #f4f4f4;
+        }
+
+        #users-panel {
+            width: 200px;
+            background-color: #fff;
+            border-right: 1px solid #ccc;
+            padding: 10px;
+            box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+        }
+
+        #chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 10px;
+        }
+
+        #chat {
+            flex: 1;
+            border: 1px solid #ccc;
+            background-color: #fff;
+            overflow-y: scroll;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+        }
+
+        #message-input {
+            display: flex;
+        }
+
+        #message {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            margin-right: 10px;
+        }
+
+        .message {
+            margin: 5px 0;
+            padding: 8px 12px;
+            border-radius: 10px;
+            max-width: 60%;
+            word-wrap: break-word;
+        }
+
+        .sender {
+            text-align: right;
+            background-color: #e1ffc7;
+            margin-left: auto;
+        }
+
+        .receiver {
+            text-align: left;
+            background-color: #f0f0f0;
+        }
+
+        .user-list {
+            margin: 10px 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .user-list li {
+            margin: 5px 0;
+            padding: 5px;
+            border: 1px solid #eaeaea;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+            cursor: pointer;
+        }
+
+        .user-list li:hover {
+            background-color: #ececec;
+        }
+
+        #chat-type {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        #chat-type h3 {
+            margin: 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="users-panel">
+        <h2>Online Users</h2>
+        <ul id="users-list" class="user-list"></ul>
+    </div>
+
+    <div id="chat-container">
+        <div id="chat-type">
+            <h3 id="chat-title">Group Chat</h3>
+            <button id="back-to-group" style="display:none;" onclick="goToGroupChat()">Back to Group Chat</button>
+        </div>
+        <div id="chat"></div>
+        <div id="message-input">
+            <input type="text" id="message" placeholder="Type a message">
+            <button onclick="sendMessage()">Send</button>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = '';
+        let currentChat = 'group'; // Variable para saber en qué chat estamos (group o privado)
+        let privateChatUser = ''; // Usuario con quien se tiene el chat privado
+
+        const socket = new WebSocket('ws://localhost:12345');
+
+        socket.onopen = function (event) {
+            console.log("Connected to WebSocket server");
+            currentUser = prompt("Enter your nickname:");
+            socket.send(currentUser);
+        };
+
+        socket.onmessage = function (event) {
+            const chat = document.getElementById('chat');
+            const newMessage = document.createElement('div');
+
+            // Verificar si el mensaje es una lista actualizada de usuarios en línea
+            if (event.data.startsWith("Online users:")) {
+                updateOnlineUsers(event.data);
+            } else {
+                newMessage.className = 'message';
+                const messageData = event.data.split(':');
+                const sender = messageData[0];
+
+                // Separar mensajes grupales y privados
+                if (event.data.includes('(Private')) {
+                    // Si es un mensaje privado, asegurarse de que es para este usuario en particular
+                    if (currentChat === 'private' && (event.data.includes(`(Private from ${privateChatUser})`) || event.data.includes(`(Private to ${privateChatUser})`))) {
+                        newMessage.classList.add(sender === currentUser ? 'sender' : 'receiver');
+                        newMessage.textContent = event.data;
+                    }
+                } else {
+                    // Mensajes del chat grupal
+                    if (currentChat === 'group') {
+                        newMessage.classList.add(sender === currentUser ? 'sender' : 'receiver');
+                        newMessage.textContent = event.data;
+                    }
+                }
+
+                if (newMessage.textContent) {
+                    chat.appendChild(newMessage);
+                    chat.scrollTop = chat.scrollHeight; // Mantener desplazamiento hacia abajo
+                }
+            }
+        };
+
+        function updateOnlineUsers(data) {
+            const usersList = document.getElementById('users-list');
+            usersList.innerHTML = '';
+
+            const users = data.replace("Online users: ", "").split(', ');
+
+            users.forEach(user => {
+                if (user !== currentUser) {
+                    const userItem = document.createElement('li');
+                    userItem.textContent = user;
+                    userItem.onclick = () => initiatePrivateChat(user);
+                    usersList.appendChild(userItem);
+                }
+            });
+        }
+
+        function sendMessage() {
+            const messageInput = document.getElementById('message');
+            const message = messageInput.value;
+
+            if (currentChat === 'group') {
+                socket.send(message); // Enviar al chat grupal
+            } else if (currentChat === 'private') {
+                socket.send(`/privado ${privateChatUser} ${message}`); // Enviar mensaje privado
+            }
+
+            messageInput.value = '';
+        }
+
+        function initiatePrivateChat(user) {
+            privateChatUser = user;
+            currentChat = 'private';
+            document.getElementById('chat-title').textContent = `Private Chat with ${user}`;
+            document.getElementById('back-to-group').style.display = 'inline';
+            document.getElementById('chat').innerHTML = ''; // Limpiar mensajes previos
+        }
+
+        function goToGroupChat() {
+            currentChat = 'group';
+            document.getElementById('chat-title').textContent = 'Group Chat';
+            document.getElementById('back-to-group').style.display = 'none';
+            document.getElementById('chat').innerHTML = ''; // Limpiar mensajes previos
+        }
+    </script>
+</body>
+
+</html>
